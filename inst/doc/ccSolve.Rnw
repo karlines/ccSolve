@@ -1,0 +1,1248 @@
+\documentclass[article,nojss]{jss}
+\DeclareGraphicsExtensions{.pdf,.eps}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Add-on packages and fonts
+\usepackage{amsmath}
+\usepackage{xspace}
+\usepackage{verbatim}
+\usepackage[english]{babel}
+%\usepackage{mathptmx}
+%\usepackage{helvet}
+\usepackage[T1]{fontenc}
+\usepackage[latin1]{inputenc}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% User specified LaTeX commands.
+\newcommand{\R}{\proglang{R }\xspace}
+\newcommand{\cc}{\pkg{ccSolve }\xspace}
+\newcommand{\bvp}{\pkg{bvpSolve }\xspace}
+\newcommand{\ds}{\pkg{deSolve } \xspace}
+\newcommand{\rs}{\pkg{rootSolve }\xspace}
+ \title{Package \pkg{ccSolve}: solving numerical problems in compiled code.
+}
+\Plaintitle{Package ccSolve, solving numerical problems in compiled code}
+\Keywords{
+  differential equations, root solving, minimization,
+  \proglang{R}
+}
+\Plainkeywords{differential equations, root solving, minimization, R}
+
+
+\author{Karline Soetaert\\
+  Royal Netherlands Institute of Sea Research\\
+  Yerseke, The Netherlands
+}
+
+\Plainauthor{Karline Soetaert}
+
+\Abstract{
+Package \cc \citep{ccSolve} generates compiled code to solve numerical problems
+(differential equations, root solving problems, optimization and least 
+squares problems) in \proglang{R}. It works with solvers from the 
+R-packages \ds \citep{deSolve}, \bvp \citep{bvpSolve},
+\rs \citep{rootSolve}, \pkg{deTestSet} \citep{deTestSet},  
+and provides extensions to the functions \code{optim}, \code{optimize},
+and \code{uniroot} from R's \pkg{stats} package \citep{R2014} and to function \code{nls.lm} 
+from the R-package \pkg{minpack.lm} \citep{minpack.lm}. 
+
+Problems specified in compiled code may speed up the solution with a factor
+up to 50 times over problems specified in R-code. However, typically the speed gain is just 
+a factor two to an order of magnitude, while in certain cases the speed gain may be even negligible.
+
+Before deciding to solve a problem via compiled code, one needs to take into 
+account that the problem also needs to be compiled before it can be solved,
+and this often takes a few seconds.
+So, the functions from \pkg{ccSolve} may not provide a good alternative to R-code 
+for one-time use.
+However, as the shared object or DLL can be saved and loaded, the compilation
+needs to be done only once so that \cc may prove worthwhile for analyses that 
+need to be repeated multiple times.
+}
+
+%% The address of (at least) one author should be given
+%% in the following format:
+\Address{
+  Karline Soetaert\\
+  Royal Netherlands Institute of \\
+  Sea Research (NIOZ)\\
+  4401 NT Yerseke, Netherlands \\
+  E-mail: \email{karline.soetaert@nioz.nl}\\
+  URL: \url{http://www.nioz.nl}\\
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% R/Sweave specific LaTeX commands.
+%% need no \usepackage{Sweave}
+%\VignetteIndexEntry{Package ccSolve, implementing numerical problems in compiled code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Begin of the document
+\begin{document}
+\SweaveOpts{engine=R,eps=FALSE}
+\SweaveOpts{keep.source=TRUE}
+
+<<preliminaries,echo=FALSE,results=hide>>=
+library("ccSolve")
+options(prompt = " ")
+options(continue = "  ")
+options(width=70)
+@ 
+
+\maketitle
+\section{Introduction}
+package \cc \citep{ccSolve}, provides an interface to problems written in 
+compiled code for solvers from the R-packages \ds \citep{deSolve}, \bvp \citep{bvpSolve},
+\rs \citep{rootSolve}, \pkg{deTestSet} \citep{deTestSet}, \pkg{minpack.lm} \citep{minpack.lm}
+and some numerical solvers from the base R-package \pkg{stats}\citep{R2014}. 
+It is meant to speed up the solution of intial value (IVP) and boundary value problems (BVP) for 
+ordinary differential equations (ODE), differential agebraic equations (DAE), partial 
+differential equations (PDE), of functions that solve for the root of 
+nonlinear equations, and of least-squares and optimization problems.
+
+The idea is to formulate the problem as text strings that are either \proglang{Fortran}, 
+\proglang{F95} or \proglang{C} code, but without specifying the headers and 
+declaration section of the code.
+\cc functions are then used to complete these codes, by adding the required 
+declarations and parts of the codes that perform technical manipulations. 
+The functions then compile the code, and load the DLL or shared object. 
+This resulting object can then be used as argument in the 
+associated solver.
+
+The package comprizes:
+  \begin{itemize}
+   \item function \code{compile.ode} to create compiled code for solving initial value ordinary 
+    differential equation problems, or for linearly implicit differential algebraic equations, 
+    that can be solved with functions from the R-packages \pkg{deSolve} \citep{deSolve} and 
+     \pkg{deTestSet} \citep{deTestSet}. 
+   \item funcion \code{compile.steady} to be used with the steady-state solvers of the package
+      \pkg{rootSolve} \citep{rootSolve}.
+   \item function \code{compile.bvp} to create compiled code for boundary value problems, 
+    to be used with functions from the R-package \bvp \citep{bvpSolve}.
+   \item function \code{compile.dae} to generate compiled code for differential 
+    algebraic initial value problems written in implicit form, to be used with solver
+    \code{daspk} from \ds or \code{mebdfi} from \pkg{deTestSet}.
+   \item function \code{compile.multiroot} to compile root finding problems, 
+    used with solvers from the R-package \pkg{rootSolve}.
+   \item function \code{compile.nls} and \code{compile.optim} to generate compiled code for
+   solving nonlinear least squares and optimization problems, to be used with extended versions
+   of solvers from the \pkg{stats} \citep{R2014} package.
+   \item function \code{compile.optimize} and \code{compile.uniroot} to compile one dimensional 
+    optimization and root finding problems, to be used with extended versions of th 
+    \code{optimize} and \code{uniroot} function from \pkg{stats}. 
+  \end{itemize}
+
+The solver packages (\ds, \bvp, \rs, and \pkg{deTestSet}) already included the 
+facility to write problems in compiled code, as described in the \pkg{deSolve} 
+vignette (`compiledCode') \citep{compiledCode}. Their solvers have been extended to also 
+accept compiled code generated by \cc \footnote{you may need to update your version}.
+
+\pkg{ccSolve} also contains functions \code{ccoptim}, \code{ccoptimize}, \code{ccuniroot} and \code{ccnls} 
+that extend the \code{optim}, \code{optimize}, \code{uniroot} and \code{nls} functions to 
+also support problems written in compiled code. To make these extensions,
+the original formulations from the \pkg{stats} package \citep{R2014}, 
+and from the R-packge \pkg{minpack.lm} \citep{minpack.lm} were altered.
+
+Writing compiled code and linking this to R is a rather technical endeavour: 
+it requires problem codes to be written in separate files, according to strict 
+rules, that are then compiled, linked and loaded. 
+In contrast, the new package \pkg{ccSolve} allows to define the problem as text strings, 
+in R, and it takes care of the technical aspects. To do so, it relies strongly
+on the R-package \pkg{inline} \citep{inline}. 
+
+Depending on the problem, compiled functions may be up to 50 times faster
+than R-functions, but in some cases the speed gain will be as small as a few percent only. 
+One also needs to consider that the compilation itself will easily take a few seconds. 
+
+\section{Overview}
+The R-functions that make compiled code for differential equation, and root-solving problems are called 
+\code{compile.ode}, \code{compile.bvp}, \code{compile.dae}, \code{compile.steady} and \code{compile.multiroot}. 
+As an example, the arguments of \code{compile.ode} and \code{compile.bvp} are:
+<<>>=
+args(compile.ode)
+args(compile.bvp)
+@
+The functions that make compiled versions of problems to be used with extensions of certain
+numerical solvers from R-base are similar, i.e. for solving optimization problems:
+<<>>=
+args(compile.optim)
+@
+Here \code{func}, \code{jacfunc}, \code{rootfunc}, \code{eventfunc}, 
+\code{bound}, \code{jacbound} are character vectors that contain the body of the 
+code representing the respective functions. 
+These texts can be written in \proglang{Fortran}, \proglang{F95} or \proglang{C},
+and the compiling functions will expand them, by adding the function or subroutine definition,
+and the variable declarations, but also (if applicable) code parts that perform 
+initialisation or finalisation. 
+
+The arguments \code{parms}, \code{forcings} and \code{data} allow to use the names of the model
+parameters, forcing functions and data sets, in the codes. The compiling functions will then
+either create a common block or module (\proglang{F95}) or declare global variables 
+(\proglang{C}) and include code parts to allow the solvers to put the values of 
+the parameters or the data into these structures at the start of the model application 
+(parameters, data) or at each time point (forcings).
+
+Arguments \code{y} or \code{yini} (for \code{compile.bvp}) specify the names of 
+state variables. The compiling functions then add the declarations for the state 
+variables and their derivatives to the code; for a state variable named "state", its derivative 
+is defined as "dstate". Also, code parts are added that map the state 
+variable vector to these names at the start of the derivative function, 
+while at the end of the derivative function, the derivatives are written to 
+the output vector.
+In a similar way, the functions \code{compile.optim},  \code{compile.optimize} and
+\code{compile.root} allow to declare the names of the unknowns to be solved for, by
+adding the argument \code{par} during compilation.
+
+Argument \code{outnames} allows to define the names of output variables which 
+are then declared in the code, and their values stored by the solver at each time point.
+
+Arguments \code{declaration} add extra declarations to the code, which will be pasted
+after the functions or subroutines general declarations, but before the actual code,
+while \code{includes} will be added before the functions.
+
+To date, the \code{proglang} to choose from is either \proglang{Fortran}, 
+\proglang{F95} or \proglang{C}.
+
+
+\section{Rootsolving problems}
+Root solvers try to find the values of \code{x} for which \code{f(x)} equals 0.
+
+Different solvers are invoked whether \code{x} and \code{f(x)} are one value or
+a vector. 
+\subsection{One dimensional root finding}
+Base R contains a function, called \code{uniroot} that solves for a single root 
+\code{x, f(x)} one value) within
+an interval; a simple extension from R-package \rs, \code{uniroot.all} finds 
+several single roots within this interval.
+
+Compiled code that specifies such single root-finding problems is generated with
+function \code{compile.uniroot}, whose arguments are:
+<<>>=
+args(compile.uniroot)
+@
+The \cc function \code{ccuniroot} extends the original C-code to accept problems
+specified in compiled code (\footnote{I use the simple uniroot function from R2.12, as it is simpler})
+
+As an example, the following problem:
+\begin{equation}
+f(x) = \frac{1}{cos(1+x^2)} = 0
+\end{equation},
+is solved. The implementation and solution in R is straightforward:
+<<>>=
+rootR <- function (x) 1/cos(1+x^2)
+
+print(system.time(
+ for (i in 1:100) AA <- uniroot.all(rootR, c(-10, 10))
+))
+@
+
+In the compiled code version, the problem is written as a string, the function value
+is put in a double precision number \code{f}.
+For \proglang{Fortran, F95}, both \code{f} and \code{x} are a single number,
+all variables are vectors in \code{C}.
+
+It is not too difficult to define this problem in \proglang{F95} and in \proglang{C} 
+and solve it:
+<<>>=
+croot.f95 <- compile.uniroot("f = 1.d0 / cos(1.d0+x*x)")
+croot.C   <- compile.uniroot("f[0] = 1.0/cos(1.0+x[0]*x[0]);", language = "C")
+
+print(system.time(
+ for (i in 1:100) A2 <- ccuniroot.all(croot.f95, c(-10, 10))
+))
+print(system.time(
+ for (i in 1:100) A3 <- ccuniroot.all(croot.C, c(-10, 10))
+))
+max(abs(AA-A2))
+@
+Note the use of double precision numbers in the \proglang{F95} definition (1.d0);
+this is necessary to prevent the compiler to use single precision arithmetic.
+
+If we print the \proglan{F95} code, the wrapper written by \code{compile.uniroot}
+is clear:
+<<>>=
+code(croot.f95)
+code(croot.C)
+@
+The returned object can be queried using \code{ccfunc}:
+<<>>= 
+ccfunc(croot.f95, x = 1)
+@
+
+\subsection{multiple roots}
+The R-function that makes the compiled code for multidimensional 
+root-solving problems (where \code{x} and \code{f(x)} are a vector, 
+of equal length) is called  \code{compile.multiroot}. 
+It extends the root solving functions of the R-package \pkg{rootSolve}:
+\code{multiroot} and \code{multiroot.1D}.
+
+<<>>=
+args(compile.multiroot)
+@
+
+\subsubsection{A simple two-equation model}
+We start by implementing a simple two-equation model that we will solve with
+function \code{multiroot} from R-package \code{rootSolve}.
+
+We look at the arguments of the function \code{multiroot} first:
+<<>>=
+args(multiroot)
+@
+The function specifying the problem is passed via argument \code{f}, while the
+initial guess of the x-values are in \code{start}. In addition, it is possible
+to pass a function that returns the jacobian and/or to specify its structure.
+
+The R-code to solve the first problem is:
+<<>>=
+fun.R <- function(x){
+  c(x[1] - 4*x[1]^2 - x[1]*x[2],
+    2*x[2] - x[2]^2 + 3*x[1]*x[2] )
+}
+sol <- multiroot(f = fun.R, start = c(1, 1))
+sol
+@
+
+In the compiled code version, the user must specify the values of \code{f} based 
+on the inputted values \code{x}; it is solved using the same function as the R-problem:
+
+<<>>=
+fun.f95 <- "
+ f(1) = x(1) - 4.d0*x(1)**2. - x(1) *x(2)
+ f(2) = 2.d0*x(2) - x(2)**2 + 3.d0*x(1)*x(2)
+"
+cfun.f95 <- compile.multiroot(fun.f95)
+multiroot(f = cfun.f95, start = c(1, 1))
+@
+
+\footnote{The compiled function is only twice as fast as the original R-function, so it does
+not really make sense to do the effort here.}
+
+The jacobian can also be specified as a string, and added during compilation;
+when we solve this problem, the solver needs to be notified that the jacobian
+is explicitly provided by the user (the default is to estimate it numerically):
+<<>>=
+jacfun.f95 <- "
+  df (1, 1) = 1.d0 - 8.d0*x(1) - x(2)
+  df (1, 2) = -x(1)
+  df (2, 1) = 3.d0*x(2)
+  df (2, 2) = 2.d0 - 2.d0*x(2) + 3.d0*x(1)
+"
+cfunjac.f95 <- compile.multiroot(func = fun.f95, jacfunc = jacfun.f95)
+multiroot(f = cfunjac.f95, start = c(1, 1), jactype = "fullusr")
+@
+
+<<>>=
+code(cfunjac.f95)
+@
+
+Note the function arguments, \code{n, t, x, f, rpar, ipar} and the jacobian arguments,
+\code{n, t, x, ml, mu, df, nrowpd, rpar, ipar}, which are enforced by the underlying
+solver codes. Many of these arguments will in general not be used (t, rpar, ipar)
+\footnote{This means that none of these names can be used e.g. as a 
+parameter or an internal variable name}.
+The user must only specify the values of \code{f} or \code{df}=$\partial{fx}/\partial{x}$ 
+based on the inputted values of \code{x}; 
+at the start of the subroutine, the values of \code{df} are put to 0.
+
+\subsubsection{six equations, using a parameter vector}
+We now solve for the root of 6 equations, using the names of parameters.
+Parameters are passed to the rootsolving function via the \code{parms} argument,
+so the same argument is used during compilation
+\footnote{Note that we cannot use \code{f} as a parameter name here, as this is also the 
+name of the function value vector. We called the offending parameter \code{ff} instead}:
+<<>>=
+sixeq.f95 <- "
+ f(1) = x(1) + x(2)/x(6) + x(3) + a*x(4) - b
+ f(2) = a*x(3) + c*x(4) + x(5) + x(6) - d
+ f(3) = x(1) + b*x(2) + exp(x(4)) + x(5) + x(6) + e
+ f(4) = a*x(3) + x(3)*x(5) - x(2)*x(3) - ff*(x(5)**2)
+ f(5) = g*(x(3)**2) - x(4)*x(6)
+ f(6) = h*x(1)*x(6) - x(2)*x(5)
+"
+parms <- c(a = 2, b = 2, c = 3, d = 4, e = 8, ff = 0.1, g = 8, h = 50)
+@
+
+<<>>=
+csixeq <- compile.multiroot(sixeq.f95, parms = parms)
+multiroot(f = csixeq, start = rep(1, 6), parms = parms)
+@
+When a parameter vector is passed upon compilation, 
+function \code{compile.multiroot} will create a common block 
+(\proglang{Fortran, F95}) or a global vector (\proglang{C}), assigning the 
+parameter \emph{names} in the compiled code. In addition, an initialiser function
+is added to the code, that allows the solver to put the parameter values, as passed
+to the solver, in this common block or global variables.
+A printout of the \proglang{F95} code shows what this looks like for the current problem;
+the vignette "compiledCode" \citep{compiledCode} from the \pkg{deSolve} package
+gives more information to how this works.
+<<>>=
+code(csixeq)
+@
+
+\subsubsection{variable number of equations}
+We end this section with a large problem that solves the so-called Rosenbrock equation.
+We first implement it in R-code:
+<<>>=                                 
+rosenbrock.R <- function(x) {
+  f[i.uneven] <- 1 - x[i.uneven]
+  f[i.even]   <- 10 *(x[i.even] - x[i.uneven]^2)
+  f
+}
+n <- 100000
+i.uneven <- seq(1, n-1, by = 2)
+i.even <- i.uneven + 1
+f <- vector(length = n)
+@
+Solving this with 100000 equations using a default (full) jacobian takes almost forever, as
+this problem has a jacobian of size $100000^2$, so we will not do this.
+
+The problem is however solved very fast when we specify the special structure of 
+the jacobian which has nonzero values only on the diagonal and immediately 
+below the diagonal (the latter due to the dependence of \code{f(i)} on \code{x(i-1)}).
+
+We solve the problem, using function \code{multiroot.1D}, which assumes a banded Jacobian.
+
+Although we will define a problem consisting of $1e^5$ equations, as the R-code 
+uses vectorised calculations, this is very fast:
+<<>>=
+print(system.time(
+AR <- multiroot.1D(f = rosenbrock.R, start = runif(n), nspec = 1))
+)
+@
+The implementation in \proglang{Fortran 95} consists of two loops; note that "**" denotes the 
+power in \proglang{Fortran}.
+<<>>=
+rosenbrock.f95 <- "
+ integer i
+ do i  = 1, n-1, 2
+  f(i) = 1 - x(i)
+ enddo
+ do i  = 2, n, 2
+  f(i) = 10 *(x(i) - x(i-1)**2)
+ enddo
+"
+
+cRosenbrock.f95 <- compile.multiroot(rosenbrock.f95)
+@
+In \proglang{C}, it is similar:
+<<>>=
+rosenbrock.C <- "
+ int i;
+ for(i = 0; i < *n-1; i = i+2)
+  f[i] = 1 - x[i];
+ for(i = 1; i < *n; i = i+2)
+  f[i] = 10 *(x[i] - x[i-1]*x[i-1]);
+"
+cRosenbrock.C <- compile.multiroot(rosenbrock.C, language = "C")
+@
+
+The value of \code{n} will be known when the model is called.
+
+<<>>=
+print(system.time(
+  A <- multiroot.1D(f = cRosenbrock.f95, start = runif(100000),  nspec = 1))
+)
+@
+The solution of this set of equations is 1 for all variables:.
+<<>>=
+range(A$root)
+@
+
+\subsection{Steady-states of differential equations}
+Steady-state solvers find the roots or steady-state solutions of differential equations.
+In R, the functions \code{stode} and \code{stodes} from the R-package \pkg{rootSolve}
+do this. In order to generate compiled versions, the function \code{compile.steady} should be used.
+It will be discussed in a later section.
+
+\section{Least squares}
+These are methods to find the best-fitting curve through a data set, by adjusting
+parameter values in a way that it minimises the squared residuals of the model 
+to the data. 
+
+R's standard non-linear least-squares method is called \code{nls}, but as this 
+is implemented in R-code, it was not simple, nor deemed appropriate, to make 
+it suitable for solving compiled code problems. 
+However, an R interface to the Levenberg-Marquardt 
+nonlinear least-squares algorithm found in MINPACK has been provided in the R-package
+\pkg{minpack.lm} \citep{minpack.lm}, so this was used for extension to compiled 
+code instead. 
+Apart from the \language{Fortran} versus R implementation, the method in the latter 
+package by default scales the parameters, which may make it slightly more efficient.
+
+The first example of \code{nls} is used to show the implementation of least 
+squares problems in compiled code.
+<<>>=
+DNase1 <- subset(DNase, Run == 1)
+head (DNase1)  
+
+print(system.time(
+for (i in 1:100)
+fm <- nls(density ~ 1/(1 + exp((xmid - log(conc))/scal)),
+                 data = DNase1,
+                 start = list(xmid = 0, scal = 1))
+))
+summary(fm)
+@
+Here the parameters are called \code{xmid} and \code{scal}, while the data sets,
+as present in \code{data.frame} \code{DNase1}, are \code{conc} and \code{density}.
+
+Compiled code cannot work with the formula notation, so the residuals are specified
+instead, and put in vector \code{f}. 
+To make the compiled code readable, the problem is compiled such that the 
+parameters to be solved for and the names of the data are known in the model functions.
+
+During compilation, only the names are important; the actual values will be passed
+during the application. This is done by calling the added subroutine \code{initdat},
+at the start of the application. Here, memory will be allocated for the data, and  
+ a solver function (\code{nlsdat}) is called to copy the data. At the end of the 
+ application, the same subroutine is called to free the allocated memory.
+
+\proglang{F95} works with vectors, so this gives the most simple codes:
+<<>>=
+fm.f95 = "f = density - 1.d0/(1.d0 + dexp((xmid - dlog(conc))/scal))"
+
+cfm.f95 <- compile.nls(func = fm.f95, par = c(xmid = 0, scal = 1), 
+  data = DNase1[,-1])  
+code(cfm.f95)
+@
+For \proglang{C} the residuals need to be calculated using a loop:
+<<>>=
+cfm.C <- compile.nls(func = '
+ int i; 
+ for (i = 0; i < *ndat; i++)
+   f[i] = density[i] - 1.0/(1.0 + exp((xmid - log(conc[i]))/scal));',
+ parms = c(xmid = 0, scal = 1), 
+ data = DNase1[,-1], language = "C")  
+@
+<<>>=
+print(system.time(
+for (i in 1:100)
+ fm2 <- ccnls(fn = cfm.f95, data = DNase1[,-1], 
+   par = c(xmid = 0, scal = 1))
+))
+summary(fm2)
+@
+
+\section{optimization problems}
+In optimization problems, one tries to find values of $x$ for which 
+$f(x)$ reaches either a minimum or a maximum; in contrast to the root solving
+methods, here the lengths of $x$ and $f(x)$ need not be the same.
+
+The \code{optim} and \code{optimize} functions from the R-base \pkg{stats} package \citep{R2014}
+have been extended to support optimizing problems written in compiled code. 
+The new solver functions are called \code{ccoptim} and \code{ccoptimize} and take the same arguments 
+as the \code{optimize} functions. The compiling functions are called \code{compile.optim}
+and \code{compile.optimize}.
+
+\subsection{Data fitting problem}
+The optimization functions are often used for fitting a model to data. 
+To implement the previous example for use with \code{optim},
+the sum of squared residuals is minimised; the function to minimise, in \proglang{R} and 
+\proglang{F95}:
+<<>>=
+Opt.R <- function(p) {
+  with (DNase1[,-1],
+   sum((density - 1/(1 + exp((p[1] - log(conc))/p[2])))^2)  
+  ) 
+}
+print(system.time(for (i in 1:100)
+A <- optim (fn = Opt.R, par = c(xmid = 0, scal = 1), 
+  method = "CG")))
+
+Opt.f95 = "f = sum((density - 1.d0/(1.d0 + dexp((xmid - dlog(conc))/scal)))**2)"
+
+cOpt.f95 <- compile.optim(func = Opt.f95, par = c(xmid = 0, scal = 1), 
+  data = DNase1[,-1])  
+code(cOpt.f95)
+
+print(system.time(for (i in 1:100)
+AA <- ccoptim (fn = cOpt.f95, par = c(xmid = 0, scal = 1), 
+  method = "CG", data = DNase1[,-1])))
+AA
+@
+\subsection{The Brown problem}
+There also exist minimzation problem for which the time gain upon using compiled
+code is not large. An example is the Brown problem, one of the many problems present as
+a demo in the \pkg{optimx} package \citep{optimx}:
+<<>>=
+brown.R <- function(p) {
+ sum((p[odd]^2)^(p[even]^2 + 1) + (p[even]^2)^(p[odd]^2 + 1))
+}
+npar <- 100  
+p0 <- rnorm(npar, sd = 2)
+n <- npar
+odd <- seq(1, n, by = 2)
+even <- seq(2, n, by = 2)
+print(system.time(
+  ans.opt <- optim(par = p0, fn = brown.R, method = "BFGS")))
+@
+The \proglang{Fortran 95} version is:
+<<>>=
+brown.f95 <- "integer i
+  f = 0.d0
+  do i = 1, n-1, 2
+     f = f + (x(i)**2)**(x(i+1)**2 + 1.d0) + (x(i+1)**2)**(x(i)**2 + 1.d0)
+  enddo
+"
+ccbrown <- compile.optim(brown.f95)
+print(system.time(
+  ans.cc <- ccoptim(par = p0, fn = ccbrown, method = "BFGS")))
+@
+\section{initial value problems of differential equations}
+
+Here we give some typical uses of the function \code{compile.ode} that creates the 
+compiled code for initial value problems of ordinary differential equations, and
+of differential algebraic equations written in linear implicit form. 
+
+Its argument are:
+<<>>=
+args(compile.ode)
+@
+\subsection{Simple ODE initial value problem}
+The famous Lorenz equations model chaos in the earth's atmosphere.
+The implementation in \R and \proglang{compiled code} is treated in the last chapter.
+
+\subsection{A discrete time model}
+In a difference equation, one specifies the new value of y rather than the derivative.
+
+We implement the host-parasitoid model as in \citep{Soetaert08}; its
+implementation in R is:
+<<>>=
+parms <- c(rH = 2.82, A = 100, ks = 1)
+
+parasite.R <- function (t, y, parms) {
+  with (as.list(parms), {
+   P <- y[1]
+   H <- y[2]
+   f <- A * P / (ks +H)
+   Pnew <- H* (1-exp(-f))
+   Hnew <- H * exp(rH*(1.-H) - f)
+   list (c(Pnew, Hnew))   
+  })
+} 
+@
+In \proglang{Fortran 95}, and using parameter and state variable names:
+
+<<>>=
+declaration <- "        double precision ff"
+parasite.f90 <- "
+        ff = A * P / (ks + H)
+        dP = H * (1.d0 - exp(-ff))
+        dH = H * exp (rH * (1.d0 - H) - ff)
+"
+parms <- c(rH = 2.82, A = 100, ks = 15)
+yini <- c(P = 0.5, H = 0.5)
+cParasite <- compile.ode(func = parasite.f90, parms = parms, 
+  y = yini, declaration = declaration, language = "Fortran")
+@
+<<>>=
+system.time(out <- ode (func = parasite.R, y = yini, parms = parms, times = 0:1000,
+    method = "iteration"))
+system.time(outc <- ode (func = cParasite, y = yini, parms = parms, times = 0:1000,
+     method = "iteration"))
+@     
+<<label=it,include=FALSE>>=
+plot(out, outc, xlim = c(800, 1000), which = "P")
+@
+\setkeys{Gin}{width=0.4\textwidth}
+\begin{figure}
+\begin{center}
+<<label=it,fig=TRUE,echo=FALSE>>=
+<<it>>
+@
+\end{center}
+\caption{Solution of the iteration problem}
+\label{fig:linp}
+\end{figure}
+
+\subsection{A DAE written in linearly-implicit form}
+We implement the car axis problem, formulated in \citep{deTestSet}, 
+and which was solved in R in \citep{SoetaertCashMazzia}.
+It is an index 3 DAE which can be written as M*y = f(t,y,p).
+
+Function caraxis.f95 implements the right-hand side, without the heading.
+The declarations are in a separate string
+<<>>=
+declaration <- "double precision :: Ll, Lr, xb, yb" 
+caraxis.f95 <- "
+    yb = r * sin(w * t)
+    xb = sqrt(L * L - yb * yb)
+    Ll = sqrt(xl**2 + yl**2)
+    Lr = sqrt((xr - xb)**2 + (yr - yb)**2)
+        
+    dxl = ul
+    dyl = vl
+    dxr = ur 
+    dyr = vr
+        
+    dul  = (L0-Ll) * xl/Ll      + 2.0 * lam2 * (xl-xr) + lam1*xb
+    dvl  = (L0-Ll) * yl/Ll      + 2.0 * lam2 * (yl-yr) + lam1*yb - k * g
+               
+    dur  = (L0-Lr) * (xr-xb)/Lr - 2.0 * lam2 * (xl-xr)
+    dvr  = (L0-Lr) * (yr-yb)/Lr - 2.0 * lam2 * (yl-yr) - k * g
+        
+    dlam1 = xb * xl + yb * yl
+    dlam2 = (xl - xr)**2 + (yl - yr)**2. - L * L
+"
+@
+
+The 8 parameters and the initial conditions are passed to the \code{compile.ode} function
+<<>>=
+eps <- 0.01; M <- 10; k <- M * eps^2/2; 
+L <- 1; L0 <- 0.5; r <- 0.1; w <- 10; g <- 1
+
+parameter <- c(eps = eps, M = M, k = k, L = L, L0 = L0, 
+               r = r, w = w, g = g)
+
+yini <- c(xl = 0, yl = L0, xr = L, yr = L0,
+          ul = -L0/L, vl = 0,
+          ur = -L0/L, vr = 0,
+          lam1 = 0, lam2 = 0)
+ccaraxis <- compile.ode(caraxis.f95, parms = parameter, y = yini, 
+  declaration = declaration)
+@
+The first 4 variables are of index 1; the next 4 of index 2, and the last 2 variables are of index 3:
+<<>>=
+index <- c(4, 4, 2)
+@
+After specifying the mass matrix, and the output times, 
+the model is solved three times with different parameter values.
+<<>>=
+Mass      <- diag(nrow = 10, 1)
+Mass[5,5] <- Mass[6,6] <- Mass[7,7] <- Mass[8,8] <- M * eps * eps/2
+Mass[9,9] <- Mass[10,10] <- 0
+Mass
+
+times <- seq(0, 3, by = 0.01)
+outDLL <- daspk(y = yini, mass = Mass, times = times, func = ccaraxis,
+                parms = parameter, nind = index)
+p2 <- parameter; p2["r"] <- 0.2
+outDLL2 <- daspk(y = yini, mass = Mass, times = times, func = ccaraxis,
+                parms = p2, nind = index)
+p2["r"] <- 0.05
+outDLL3 <- daspk(y = yini, mass = Mass, times = times, func = ccaraxis,
+                parms = p2, nind = index)
+@
+<<label=dllimp,include=FALSE, width = 8, height = 5>>=
+plot(outDLL, outDLL2, outDLL3, which = 1, type = "l", lwd = 2)
+@
+
+\setkeys{Gin}{width=0.4\textwidth}
+\begin{figure}
+\begin{center}
+<<label=dllimp,fig=TRUE,echo=FALSE>>=
+<<dllimp>>
+@
+\end{center}
+\caption{Solution of the linearly-implicit DAE problem}
+\label{fig:dae}
+\end{figure}
+
+\subsection{Steady-state of differential equations}
+
+Finding the steady-state of a set of differential equations is somewhat inbetween
+root solving and differential equation solving.  
+This is because the problems are defined as differential equations, yet they are
+solved as root solving problems. 
+
+To complete the differential equation section, we implement a simple sediment 
+biogeochemical model, which is an example from the \pkg{rootSolve} function \code{stode}.
+
+In addition to the 9 parameters (argument \code{parms}) that we pass during 
+compilation, we also povide the names of the state variables (\code{y}) 
+and one output variable (\code{outnames}).
+
+As we are now dealing with differential equations, we compile the code with \code{compile.ode}.
+This function is treated in detail in next section.
+
+We separate the declarations in the code from the body of the code.
+This is necessary as function \code{compile.ode} adds lines of code to the program.
+
+<<>>=
+declaration <- "  double precision :: Min, oxicmin, anoxicmin
+"  
+
+cBiogeo.f95 <- "
+  Min       = r*OM
+  oxicmin   = Min*(O2/(O2+ks))
+  anoxicmin = Min*(1-O2/(O2+ks))* SO4/(SO4+ks2)
+
+  dOM  = Flux - oxicmin - anoxicmin
+  dO2  = -oxicmin      -2*rox*HS*(O2/(O2+ks)) + D*(BO2-O2)
+  dSO4 = -0.5*anoxicmin  +rox*HS*(O2/(O2+ks)) + D*(BSO4-SO4)
+  dHS  = 0.5*anoxicmin   -rox*HS*(O2/(O2+ks)) + D*(BHS-HS)
+
+  SumS = SO4 + HS
+"
+@
+Note that the state variables (OM, O2, SO4, HS) are called by their name rather
+than by their position in the state variable vector. In the code the derivatives
+(called dOM, dO2, dSO4, dHS) are given a value.
+
+The parameter values are:
+<<>>=
+pars <- c(D = 1, Flux = 100, r = 0.1, rox = 1,
+          ks = 1, ks2 = 1, BO2 = 100, BSO4 = 10000, BHS = 0)
+@
+<<>>=
+y <- c(OM = 1, O2 = 1, SO4 = 1, HS = 1)
+
+cBiogeo <- compile.ode(func = cBiogeo.f95, parms = pars, y = y,
+  outnames = "SumS", declaration = declaration)
+@
+When compiling this problem, we passed the parameter vector (\code{parms}),
+the name of the output variable (argument \code{outnames}), and the names of the 
+state variables, via the  initial condition vector (argument \code{y}). 
+Consequently, parameter names, state variable names and ordinary variable names
+ are known in the subroutine. In addition, at each time step, the state variables 
+ get their current value, while the derivatives, specified by the user are put
+ in the derivative vector \code{f} at the end of the subroutine.
+The derivatives of the state variables are declared as "dOM, dO2, ...".
+The entire model code is:
+<<>>=
+code(cBiogeo)
+@
+The problem is solved by direct iteration; as there may be a 
+-biologically unrealistic- negative solution, positivity is enforced via argument \code{pos}.
+When triggering the solver, the parameters, initial conditions and 
+names of the output variables are passed, consistent with the ones used to compile the model.
+<<>>=
+ST <- stode (y = y, func = cBiogeo, parms = pars, 
+  pos = TRUE, outnames = "SumS", nout = 1)
+ST
+pars["Flux"] <- 200
+ST2 <- stode (y = y, func = cBiogeo, parms = pars, 
+  pos = TRUE, outnames = "SumS", nout = 1)
+ST2
+@
+The compiled model can also be used to run in dynamic mode:
+<<>>=
+out <- ode(y = y, func = cBiogeo, times = 0:50, parms = pars, 
+  outnames = "sumS", nout = 1)
+tail(out, n = 2)  
+@
+
+\section{boundary value problems}
+The R-package \pkg{bvpSolve} numerically solves boundary value problems (BVP) of
+  ordinary differential equations (ODE), and of differential algebraic equations.
+  It has two solvers that can be used with problems written in compiled code:
+  \begin{itemize}
+    \item \code{bvptwp}, a mono-implicit Runge-Kutta (MIRK) method
+    \item \code{bvpcol}, a collocation method.
+  \end{itemize}
+
+\cc function \code{compile.bvp} makes compiled code from text strings that define
+the body of the derivative function defining the boundary value problems (\code{func})
+and (optionally) the jacobian function (\code{jacfunc}), the boundary function 
+(\code{bound}) and the jacobian of the boundary function (\code{jacbound}).
+
+Whereas the implementation of BVP problems have much in common with those of IVP in R, 
+one notable exception is that the independent variable is called \code{x} (denoting space) in BVPs 
+whereas it is \code{t} (for time) in IVPs.
+
+In both type of problems, the state variables are in a vector called \code{y}, 
+the function value in a vector \code{f}, and the jacobian in a vector or matrix called \code{df}.
+
+Its arguments are:
+<<>>=
+args(compile.bvp)
+@
+Here, parms and forcings, if passed will define parameters and forcings, to be 
+used in the code and will set their values upon solving the problem, either at 
+the start (parms) or for each x-value (forcings). This will be done by the 
+solver. By specifying \code{outnames}, output variables will be defined
+that can be given a value in the code (by the user).
+
+
+\subsection{The swirling flow III problem}
+The `Swirling Flow III' BVP is a test problem in \citep{asher95}.
+The two equations, of second and fourth order are:
+\begin{eqnarray*}
+g'' &=& (g f' - f g')/eps\\
+f'''' &=& (-ff'''-gg')/eps
+\end{eqnarray*}
+with boundary conditions:
+\[
+g(0) = -1, f(0) = 0, f'(0) = 0, \\g(1) = 1, f(1) = 0, f'(1) = 0
+\]
+
+Rewritten as a first-order system, defining $y_1=g$, $y_3=f$
+\begin{eqnarray*}
+ y_1' = y_2\\
+ y_2' = (y_1*y_4 - y_3*y_2)/eps\\
+ y_3' = y_4\\
+ y_4' = y_5\\
+ y_5' = y_6\\
+ y_6' =(-y_3y_6-y_1y_2)/eps
+\end{eqnarray*}
+ 
+The boundary equations are simple, so there is no need to specifiy them as a function (see next chapter for that).
+
+We start by declaring the problem-specific parts, the x-domain and the boundary conditions:
+<<>>=
+require(bvpSolve)
+
+x       <- seq(0, 1, 0.01)
+yini <- c(-1, NA, 0, 0, NA, NA)
+yend <- c(1 , NA, 0, 0, NA, NA)
+@
+
+The parameter \code{eps} in this BVP defines the stiffness of the problem.
+We use this example to show the two ways of passing parameters in BVPs
+\subsubsection{passing parameters via rpar}
+The first way, not recommended, is to pass parameters via the vector \code{rpar}. 
+<<>>=
+fswirl <- "
+  eps = rpar(1)
+  f(1) = Y(2)
+  f(2) = (Y(1)*Y(4) - Y(3)*Y(2))/eps
+  f(3) = Y(4)
+ 	f(4) = Y(5)
+ 	f(5) = Y(6)
+  f(6) = (-Y(3)*Y(6) - Y(1)*Y(2))/eps
+"
+cswirl <- compile.bvp(func = fswirl, declaration = "double precision:: eps")
+print(system.time(sol <- bvptwp(x = x, func = cswirl, 
+                  yini = yini, yend = yend, eps = 0.01, parms = 0.01)))
+@
+We can also specify the problem in higher-order form, but then it can only be solved
+with \code{bvpcol}:
+<<>>=
+fswirl2 <- "
+  eps = rpar(1)
+  f(1) = (Y(1)*Y(4) - Y(3)*Y(2))/eps
+  f(2) = (-Y(3)*Y(6) - Y(1)*Y(2))/eps
+"
+cswirl2 <- compile.bvp(func = fswirl2, declaration = "double precision:: eps")
+print(system.time(sola <- bvpcol(x = x, func = cswirl2, order = c(2, 4), 
+                  yini = yini, yend = yend, eps = 0.01, parms = 0.01)))
+@
+\subsubsection{passing parameters via the parms argument}
+It is more convenient to define parameters via the \code{parms} argument during compilation, 
+as in this case, the parameter is named and either declared,
+in a common block(\language{Fortran, F95}) or as a global variable (\language{C}): 
+<<>>=
+fswirl3 <- "
+  f(1) = Y(2)
+  f(2) = (Y(1)*Y(4) - Y(3)*Y(2))/eps
+  f(3) = Y(4)
+ 	f(4) = Y(5)
+ 	f(5) = Y(6)
+  f(6) = (-Y(3)*Y(6) - Y(1)*Y(2))/eps
+"
+cswirl3 <- compile.bvp(fswirl3, parms = c(eps = 0.1))
+
+print(system.time(solb <- bvptwp(x = x, func = cswirl3, 
+                  yini = yini, yend = yend, eps = 0.01, parms = 0.01)))
+@
+We can use this to solve the problem for successively smaller values of \code{eps}:
+<<>>=
+print(system.time(sol2 <- bvptwp(x = x, func = cswirl, 
+                  xguess = sol[,1], yguess = t(sol[,-1]),
+                  yini = yini, yend = yend, eps=0.001, epsini = 0.01,
+                  parms=0.001)))
+
+print(system.time(sol3 <- bvptwp(x = x, func = cswirl, 
+                  xguess = sol2[,1], yguess = t(sol2[,-1]),
+                  yini = yini, yend = yend, eps = 0.0001, 
+                  epsini = 0.001, parms = 0.0001)))
+
+print(system.time(sol3b <- bvptwp(x = x, func = cswirl3, 
+                  xguess = sol2[,1], yguess = t(sol2[,-1]),
+                  yini = yini, yend = yend, eps = 0.0001, 
+                  epsini = 0.001, parms = 0.0001)))
+@
+When we use conditioning the problem can be solved for even smaller values of \code{eps}:
+<<>>=
+print(system.time(sol4 <- bvptwp(atol = 1e-5, x = x, func = cswirl, cond = TRUE, 
+                  xguess = sol3[,1], yguess = t(sol3[,-1]),
+                  yini = yini, yend = yend, eps = 5e-5 , parms=5e-5)))
+@
+<<label=swirl,include=FALSE, width = 8, height = 5>>=
+plot(sol, sol2, sol3, sol4)
+@
+
+\setkeys{Gin}{width=0.6\textwidth}
+\begin{figure}
+\begin{center}
+<<label=swirl,fig=TRUE,echo=FALSE>>=
+<<swirl>>
+@
+\end{center}
+\caption{Solution of the BVP swirl problem for different values of eps}
+\label{fig:swirl}
+\end{figure}
+
+\subsection{Specifying all functions in compiled code BVPs}
+We implement the measels problem as from \citep{asher95} and \citep{SoetaertCashMazzia}.
+It models the spread of measels in three equations and for one year; it is a boundary value problem
+as the condition at the end of the year has to be equal to the starting conditions.
+
+Its implementation in \R is:
+<<>>=
+require(bvpSolve)
+measel.R <- function(t, y, pars)  {
+  bet <- 1575*(1+cos(2*pi*t))
+  dy1 <- mu-bet*y[1]*y[3]
+  dy2 <- bet*y[1]*y[3]-y[2]/lam
+  dy3 <- y[2]/lam-y[3]/vv
+  dy4 <- 0
+  dy5 <- 0
+  dy6 <-0
+  
+  list(c(dy1, dy2, dy3, dy4, dy5, dy6))
+}
+
+dmeasel.R <- function(t, y, pars) {
+  df <- matrix (data = 0, nrow = 6, ncol = 6)
+  bet <- 1575*(1+cos(2*pi*t))
+  df[1,1] <-  -bet*y[3]
+  df[1,3] <-  -bet*y[1]
+
+  df[2,1] <-  bet*y[3]
+  df[2,2] <-  -1/lam
+  df[2,3] <-  bet*y[1]
+
+  df[3,2] <- 1/lam 
+  df[3,3] <- -1/vv
+  
+  return(df)
+}
+
+bound.R <- function(i, y, pars) {
+  if ( i == 1 | i == 4) return(y[1] - y[4])
+  if ( i == 2 | i == 5) return(y[2] - y[5])
+  if ( i == 3 | i == 6) return(y[3] - y[6])  
+}
+
+dbound.R <- function(i, y, pars,vv) {
+  if ( i == 1 | i == 4) return(c(1, 0, 0, -1 ,0, 0))
+  if ( i == 2 | i == 5) return(c(0, 1, 0, 0, -1, 0))
+  if ( i == 3 | i == 6) return(c(0, 0, 1, 0, 0, -1))
+}
+@
+which specifies the derivative function, the jacobian, the boundary function 
+and the jacobian of the boundary respectively.
+To solve it, good initial conditions are needed:
+<<>>=
+mu  <- 0.02
+lam <- 0.0279
+vv  <- 0.1
+
+x <- seq (0, 1, by = 0.01)
+yguess <- matrix(ncol = length(x), nrow = 6, data = 1)
+rownames(yguess) <- paste("y", 1:6, sep = "")
+
+print(system.time(
+  solR <- bvptwp(func = measel.R, jacfunc = dmeasel.R, 
+    bound = bound.R, jacbound = dbound.R, 
+    xguess = x, yguess = yguess,
+    x=x, leftbc = 3, ncomp = 6, 
+    nmax = 100000, atol = 1e-4)
+))
+@
+The compiled code implementation is:
+<<>>=
+measel.f95 <- " 
+   bet = 1575d0*(1.+cos(2*pi*x))
+   f(1) = mu - bet*y(1)*y(3)
+   f(2) = bet*y(1)*y(3) - y(2)/lam
+   f(3) = y(2)/lam-y(3)/vv
+   f(4) = 0.d0
+   f(5) = 0.d0
+   f(6) = 0.d0
+"
+
+dmeasel.f95 <- "
+  bet = 1575d0*(1+cos(2*pi*x))
+  df(1,1) =  -bet*y(3)
+  df(1,3) =  -bet*y(1)
+
+  df(2,1) =  bet*y(3)
+  df(2,2) =  -1.d0/lam
+  df(2,3) =  bet*y(1)
+
+  df(3,2) = 1.d0/lam 
+  df(3,3) = -1.d0/vv
+"
+
+bound.f95 <- "
+  if ( i == 1 .OR. i == 4) g = (y(1) - y(4))
+  if ( i == 2 .OR. i == 5) g = (y(2) - y(5))
+  if ( i == 3 .OR. i == 6) g = (y(3) - y(6))  
+"
+
+dbound.f95 <- "
+  if ( i == 1 .OR. i == 4) THEN
+    dg(1) = 1.
+    dg(4) = -1.
+  else if ( i == 2 .OR. i == 5) then
+    dg(2) = 1.
+    dg(5) = -1.
+  else
+    dg(3) = 1.
+    dg(6) = -1.
+  end if
+"  
+
+parms <- c(vv = 0.1, mu = 0.02, lam = 0.0279)
+cMeasel <- compile.bvp(func = measel.f95, jacfunc = dmeasel.f95, 
+  bound = bound.f95, jacbound = dbound.f95, parms  = parms, 
+  declaration = "double precision, parameter :: pi = 3.141592653589793116d0\n double precision :: bet")
+
+x <- seq (0, 1, by = 0.01)
+yguess <- matrix(ncol = length(x), nrow = 6, data = 1)
+rownames(yguess) <- paste("y", 1:6, sep = "")
+
+print(system.time(
+  sol1 <- bvptwp(func = cMeasel, 
+    xguess = x, yguess = yguess,
+    x = x, leftbc = 3, parms = parms, ncomp = 6, 
+    nmax = 100000, atol = 1e-8)
+))
+
+print(system.time(
+  sol2 <- bvptwp(func = cMeasel, 
+    xguess = x, yguess = yguess,
+    x=x, leftbc = 3, parms = parms * c(1, 2, 2) , ncomp = 6, 
+    nmax = 100000, atol = 1e-8)
+))
+@
+
+<<label=mes,include=FALSE>>=
+plot(sol1, sol2)
+@
+\setkeys{Gin}{width=0.6\textwidth}
+\begin{figure}
+\begin{center}
+<<label=mes,fig=TRUE,echo=FALSE>>=
+<<mes>>
+@
+\end{center}
+\caption{Two solutions of the measel BVP problem}
+\label{fig:mes}
+\end{figure}
+
+
+\section{Benchmarking}
+This is a quick test of where the time gain using compiled code is achieved.
+It appears that there is lots to be gained by having everything in compiled code;
+compared to pure R this can be 20 to even 100 times faster - however, it is also 
+possible that the gain is only a few percent. This a.o. depends on how many times
+a function is entered and how efficient the R-code is written.
+Using compiled code from a call within R may be tens of \% to twice faster than in pure R; 
+compared to all-compiled this is still 10 to 20 times slower.
+
+Here is how I tested several options, using the chaos model:
+<<>>=
+require(deSolve)
+
+chaos.R <- function(t, state, parameters) {
+    list(
+    c(-8/3 * state[1] + state[2] * state[3],
+      -10 * (state[2] - state[3]),
+      -state[1] * state[2] + 28 * state[2] - state[3]))
+}
+
+state <- c(xx = 1, yy = 1, zz = 1)
+times <- seq(0, 200, 0.01)
+print(system.time(
+  out   <- vode(state, times, chaos.R, 0)
+))
+
+# --------------------------------full compiled code -------------------------
+chaos.f95 <- " 
+    f(1)     = -8.d0/3 * y(1) + y(2) * y(3)
+    f(2)     = -10.d0 * (y(2) - y(3))
+    f(3)     = -y(1) * y(2) + 28d0 * y(2) - y(3)
+"
+cChaos <- compile.ode(chaos.f95) 
+print(system.time(
+  cout   <- vode(state, times, func = cChaos, parms = 0)
+))
+
+# ----------------------- calling compiled code in R -------------------------
+
+rchaos <- function(t, state, parameters) {
+   list(cChaos$func(3, t, state, f = 1:3, 1, 1)$f)
+}
+
+print(system.time(
+  cout2  <- vode(state, times, func = rchaos, parms = 0)
+))
+
+# ----------------------- bitwise compilation in R -------------------------
+require(compiler)
+bchaos <- cmpfun(chaos.R)
+
+print(system.time(
+  cout3  <- vode(state, times, func = bchaos, parms = 0)
+))
+
+@
+
+
+\section{Passing data}
+There are several ways to pass data to the compiled code. 
+\begin{itemize}
+\item All subroutines in compiled code have the arguments \code{rpar} and \code{ipar},
+a double precision and integer vector, that are passed with arguments of the same name
+when calling the solver. The elements in these vectors are unnamed, and can be 
+used for input. For differential equation solvers, they are also used to 
+contain the output variables (\code{compile.ode}, \code{compile.bvp}, 
+\code{compile.dae}. See vignette (`compiledCode') \citep{compiledCode}
+\item \code{parms} is to contain the values of named parameters, whose length is 
+ known during compilation. They are declared in a common block (\proglang{Fortran}) or as global
+ variables (\proglang{C}) and their value is set at the start of the solution procedure, as
+ passed with argument \code{parms}, which is a (named) vector or list. 
+ Parameters are not supposed to be changed. 
+ They are not implemented for the minmization, uniroot and 
+ nonlinear lest squares methods (the name \code{parms} is too close to these function's argument
+ \code{par} which refers to the variables to be solved for).
+\item {forcings} are only used in certain differential equation models. Their implementation
+is akin to the parameter implementation (common block or global variable). 
+However, their values are updated by the solver at every time (or spatial, for BVP) step, by interpolating a given data set.
+\item \code{data}. This is to contain data, in \code{matrix} or \code{data.frame} format, 
+to which a model needs to be fitted. 
+During compilation, the names of the data columns are used to set variable names in the code. 
+The data variables are declared in a module (\proglang{Fortran}) 
+or as global variables (\proglang{C}). 
+The length is not necessarily known at compile time, so memory is allocated and 
+their values are set at the start of the simulation.
+Data are not meant to be changed in the compiled code.
+\end{itemize}
+
+\clearpage
+%\section{subroutine overview}
+\begin{table*}[b]
+\caption{Summary of the compiled function interfaces; in \emph{italics} is the 
+ variable that needs to be specified; \code{i, n, nroot, ndat, ldfjac, ipar, ires}
+ are integers; the rest are doubles.}\label{tb:rs} 
+\centering
+\begin{tabular}{p{.2\textwidth}p{.65\textwidth}p{.2\textwidth}}\hline
+\rule[-3mm]{0mm}{8mm}R-Function &Subroutine declaration & solvers \\
+\hline \hline
+\code{compile.ode},         & func(n, t, y(*), \emph{f(*)}, rpar(*), ipar(*))    & ode, ode.1D, ...\\
+\code{compile.steady}       & jacfunc(n, t, y(*), \emph{df(n, *)}, rpar(*), ipar(*)) & steady, steady.1D,\\
+                            & rootfunc(n, t, y(*), nroot, \emph{root(*)}, rpar(*), ipar(*)) & runsteady\\
+                            & eventfunc(n, t, \emph{y(*)})    & \\             \hline
+\code{compile.bvp}          & func(n, x, y(*), \emph{f(*)}, rpar(*), ipar(*)) & bvpcol,\\
+                            & jacfunc(n, x, y(n, *), \emph{df(*)}, rpar(*), ipar(*)) & bvptwp\\
+                            & bound(i, n, y(*), \emph{g(*)}, rpar(*), ipar(*))&\\
+                            & jacbound(i, n, y(*), \emph{dg(*)}, rpar(*), ipar(*))&\\  \hline
+\code{compile.dae}          & res(t, y(*), dy(*), cj, \emph{r(*)}, ires, rpar(*), ipar(*))& daspk\\
+                            & rootfunc(n, t, y(*), nroot, \emph{root(*)}, rpar(*), ipar(*))& mebdfi\\
+                            & eventfunc(n, t, \emph{y(*)})   & \\             \hline
+\code{compile.multiroot}    & func(n, t, y(*), \emph{f(*)}, rpar(*), ipar(*))&multiroot\\
+                            & jacfunc(n, t, y(*), \emph{df(*)}, rpar(*), ipar(*))& multiroot.1D\\   \hline
+\code{compile.nls}          & func(n, ndat, x(n), \emph{f(ndat)}, rpar(*), ipar(*))& \code{ccnls}\\
+                            & jacfunc(n, ndat, ldfjac, x(*), \emph{df(ldfjac, *)}, rpar(*), ipar(*))&\\   \hline
+\code{compile.optim}        & func(n, x(n), \emph{f}, rpar(*), ipar(*))&\code{ccoptim}\\
+                            & jacfunc(n, x(n), \emph{df(n,*)}, rpar(*), ipar(*))&\\      \hline
+\code{compile.optimize},    & func(x, \emph{f}, rpar(*), ipar(*)) & \code{ccoptimize}\\
+\code{compile.uniroot}      &                               & \code{ccuniroot}, \code{ccuniroot.all}  \\     \hline
+\code{compile.integrate}    & func(n, x(n), \emph{f(n)}, rpar(*), ipar(*)) & \code{ccintegrate}  \\     \hline
+
+\hline
+\end{tabular}
+\end{table*}
+
+\bibliography{docs}
+\end{document}
