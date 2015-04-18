@@ -1,6 +1,6 @@
 Package: ccSolve
 Version: 0.1
-Title: Solving numerical problems in compiled code
+Title: Solving Numerical Problems in Compiled Code
 Authors@R: c(person("Karline","Soetaert", role = c("aut", "cre"), 
                      email = "karline.soetaert@nioz.nl"),
              person("minpack.lm authors", role = "ctb"),

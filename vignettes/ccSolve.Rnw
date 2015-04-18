@@ -49,8 +49,7 @@ up to 50 times over problems specified in R-code. However, typically the speed g
 a factor two to an order of magnitude, while in certain cases the speed gain may be even negligible.
 
 Before deciding to solve a problem via compiled code, one needs to take into 
-account that the problem also needs to be compiled before it can be solved,
-and this often takes a few seconds.
+account that the problem also needs to be compiled and this often takes a few seconds.
 So, the functions from \pkg{ccSolve} may not provide a good alternative to R-code 
 for one-time use.
 However, as the shared object or DLL can be saved and loaded, the compilation
@@ -88,23 +87,22 @@ options(width=70)
 
 \maketitle
 \section{Introduction}
-package \cc \citep{ccSolve}, provides an interface to problems written in 
+The package \cc \citep{ccSolve}, provides an interface to problems written in
 compiled code for solvers from the R-packages \ds \citep{deSolve}, \bvp \citep{bvpSolve},
 \rs \citep{rootSolve}, \pkg{deTestSet} \citep{deTestSet}, \pkg{minpack.lm} \citep{minpack.lm}
 and some numerical solvers from the base R-package \pkg{stats}\citep{R2014}. 
-It is meant to speed up the solution of intial value (IVP) and boundary value problems (BVP) for 
+It is meant to speed up the solution of initial value (IVP) and boundary value problems (BVP) for
 ordinary differential equations (ODE), differential agebraic equations (DAE), partial 
 differential equations (PDE), of functions that solve for the root of 
 nonlinear equations, and of least-squares and optimization problems.
 
-The idea is to formulate the problem as text strings that are either \proglang{Fortran}, 
+The idea is to formulate the problem as text strings that are either valid \proglang{Fortran},
 \proglang{F95} or \proglang{C} code, but without specifying the headers and 
 declaration section of the code.
-\cc functions are then used to complete these codes, by adding the required 
+The \cc functions are then used to complete these codes, by adding the required
 declarations and parts of the codes that perform technical manipulations. 
-The functions then compile the code, and load the DLL or shared object. 
-This resulting object can then be used as argument in the 
-associated solver.
+The functions also compile the code, and load the DLL or shared object.
+This resulting object can then be used as argument in the associated solver.
 
 The package comprizes:
   \begin{itemize}
@@ -145,7 +143,7 @@ it requires problem codes to be written in separate files, according to strict
 rules, that are then compiled, linked and loaded. 
 In contrast, the new package \pkg{ccSolve} allows to define the problem as text strings, 
 in R, and it takes care of the technical aspects. To do so, it relies strongly
-on the R-package \pkg{inline} \citep{inline}. 
+on the R-package \pkg{inline} \citep{inline} that was therefore extended (e.g. to make it more Fortran-Friendly).
 
 Depending on the problem, compiled functions may be up to 50 times faster
 than R-functions, but in some cases the speed gain will be as small as a few percent only. 
@@ -208,7 +206,7 @@ Different solvers are invoked whether \code{x} and \code{f(x)} are one value or
 a vector. 
 \subsection{One dimensional root finding}
 Base R contains a function, called \code{uniroot} that solves for a single root 
-\code{x, f(x)} one value) within
+\code{x, f(x)} within
 an interval; a simple extension from R-package \rs, \code{uniroot.all} finds 
 several single roots within this interval.
 
@@ -217,14 +215,15 @@ function \code{compile.uniroot}, whose arguments are:
 <<>>=
 args(compile.uniroot)
 @
-The \cc function \code{ccuniroot} extends the original C-code to accept problems
-specified in compiled code (\footnote{I use the simple uniroot function from R2.12, as it is simpler})
+The \cc function \code{ccuniroot} extends the original C-code from the \pkg{stats} package to accept problems
+specified in compiled code (\footnote{I have used the uniroot function from version R2.12, as it is simpler than later functions})
 
 As an example, the following problem:
 \begin{equation}
 f(x) = \frac{1}{cos(1+x^2)} = 0
-\end{equation},
-is solved. The implementation and solution in R is straightforward:
+\end{equation}
+is solved. The implementation and solution in R is straightforward;
+(the problem is solved 100 times to be sure that the system time is measurable):
 <<>>=
 rootR <- function (x) 1/cos(1+x^2)
 
@@ -255,19 +254,19 @@ max(abs(AA-A2))
 Note the use of double precision numbers in the \proglang{F95} definition (1.d0);
 this is necessary to prevent the compiler to use single precision arithmetic.
 
-If we print the \proglan{F95} code, the wrapper written by \code{compile.uniroot}
+If we print the \proglang{F95} or \proglang{C} code, the wrapper written by \code{compile.uniroot}
 is clear:
 <<>>=
 code(croot.f95)
 code(croot.C)
 @
-The returned object can be queried using \code{ccfunc}:
+The returned compiled object can be queried using \code{ccfunc}:
 <<>>= 
 ccfunc(croot.f95, x = 1)
 @
 
 \subsection{multiple roots}
-The R-function that makes the compiled code for multidimensional 
+The R-function that creates the compiled code for multidimensional
 root-solving problems (where \code{x} and \code{f(x)} are a vector, 
 of equal length) is called  \code{compile.multiroot}. 
 It extends the root solving functions of the R-package \pkg{rootSolve}:
@@ -314,8 +313,8 @@ multiroot(f = cfun.f95, start = c(1, 1))
 \footnote{The compiled function is only twice as fast as the original R-function, so it does
 not really make sense to do the effort here.}
 
-The jacobian can also be specified as a string, and added during compilation;
-when we solve this problem, the solver needs to be notified that the jacobian
+The jacobian can also be specified as a string, and added during compilation.
+When we solve this problem, the solver needs to be notified that the jacobian
 is explicitly provided by the user (the default is to estimate it numerically):
 <<>>=
 jacfun.f95 <- "
@@ -327,7 +326,7 @@ jacfun.f95 <- "
 cfunjac.f95 <- compile.multiroot(func = fun.f95, jacfunc = jacfun.f95)
 multiroot(f = cfunjac.f95, start = c(1, 1), jactype = "fullusr")
 @
-
+The extended code is:
 <<>>=
 code(cfunjac.f95)
 @
@@ -336,15 +335,15 @@ Note the function arguments, \code{n, t, x, f, rpar, ipar} and the jacobian argu
 \code{n, t, x, ml, mu, df, nrowpd, rpar, ipar}, which are enforced by the underlying
 solver codes. Many of these arguments will in general not be used (t, rpar, ipar)
 \footnote{This means that none of these names can be used e.g. as a 
-parameter or an internal variable name}.
+parameter or an internal variable name.}.
 The user must only specify the values of \code{f} or \code{df}=$\partial{fx}/\partial{x}$ 
-based on the inputted values of \code{x}; 
-at the start of the subroutine, the values of \code{df} are put to 0.
+based on the inputted values of \code{x}.
+At the start of the subroutine, the values of \code{df} are put to 0.
 
 \subsubsection{six equations, using a parameter vector}
 We now solve for the root of 6 equations, using the names of parameters.
-Parameters are passed to the rootsolving function via the \code{parms} argument,
-so the same argument is used during compilation
+Parameters are passed to the rootsolving function via the \code{parms} argument.
+If we use the vector also as argument during compilation, then their names will be declared and values passed.
 \footnote{Note that we cannot use \code{f} as a parameter name here, as this is also the 
 name of the function value vector. We called the offending parameter \code{ff} instead}:
 <<>>=
@@ -360,14 +359,14 @@ parms <- c(a = 2, b = 2, c = 3, d = 4, e = 8, ff = 0.1, g = 8, h = 50)
 @
 
 <<>>=
-csixeq <- compile.multiroot(sixeq.f95, parms = parms)
-multiroot(f = csixeq, start = rep(1, 6), parms = parms)
+csixeq <- compile.multiroot(sixeq.f95, parms = parms)      # parms passed durng compilation
+multiroot(f = csixeq, start = rep(1, 6), parms = parms)    # parms passed when solving
 @
-When a parameter vector is passed upon compilation, 
-function \code{compile.multiroot} will create a common block 
+When a parameter vector is passed upon compilation,
+function \code{compile.multiroot} will create a common block
 (\proglang{Fortran, F95}) or a global vector (\proglang{C}), assigning the 
 parameter \emph{names} in the compiled code. In addition, an initialiser function
-is added to the code, that allows the solver to put the parameter values, as passed
+is added to the code, that will put the parameter values, as passed
 to the solver, in this common block or global variables.
 A printout of the \proglang{F95} code shows what this looks like for the current problem;
 the vignette "compiledCode" \citep{compiledCode} from the \pkg{deSolve} package
@@ -397,7 +396,7 @@ The problem is however solved very fast when we specify the special structure of
 the jacobian which has nonzero values only on the diagonal and immediately 
 below the diagonal (the latter due to the dependence of \code{f(i)} on \code{x(i-1)}).
 
-We solve the problem, using function \code{multiroot.1D}, which assumes a banded Jacobian.
+We therefore solve the problem using function \code{multiroot.1D} from the R-package \pkg{rootSolve}, which assumes a banded Jacobian.
 
 Although we will define a problem consisting of $1e^5$ equations, as the R-code 
 uses vectorised calculations, this is very fast:
@@ -461,10 +460,10 @@ is implemented in R-code, it was not simple, nor deemed appropriate, to make
 it suitable for solving compiled code problems. 
 However, an R interface to the Levenberg-Marquardt 
 nonlinear least-squares algorithm found in MINPACK has been provided in the R-package
-\pkg{minpack.lm} \citep{minpack.lm}, so this was used for extension to compiled 
+\pkg{minpack.lm} \citep{minpack.lm}, so this was used as the basis for extension to compiled
 code instead. 
 Apart from the \language{Fortran} versus R implementation, the method in the latter 
-package by default scales the parameters, which may make it slightly more efficient.
+package by default scales the parameters, which may make it slightly more efficient than R's \code{nls} method.
 
 The first example of \code{nls} is used to show the implementation of least 
 squares problems in compiled code.
@@ -474,35 +473,40 @@ head (DNase1)
 
 print(system.time(
 for (i in 1:100)
-fm <- nls(density ~ 1/(1 + exp((xmid - log(conc))/scal)),
+  fm <- nls(density ~ 1/(1 + exp((xmid - log(conc))/scal)),
                  data = DNase1,
                  start = list(xmid = 0, scal = 1))
 ))
 summary(fm)
 @
 Here the parameters are called \code{xmid} and \code{scal}, while the data sets,
-as present in \code{data.frame} \code{DNase1}, are \code{conc} and \code{density}.
+as present in \code{data.frame} \code{DNase1}, are called \code{conc} and \code{density}.
 
 Compiled code cannot work with the formula notation, so the residuals are specified
 instead, and put in vector \code{f}. 
-To make the compiled code readable, the problem is compiled such that the 
+
+To make the compiled code readable, the problem can be compiled such that the
 parameters to be solved for and the names of the data are known in the model functions.
 
 During compilation, only the names are important; the actual values will be passed
-during the application. This is done by calling the added subroutine \code{initdat},
+during the application. This is done by calling an added subroutine \code{initdat},
 at the start of the application. Here, memory will be allocated for the data, and  
  a solver function (\code{nlsdat}) is called to copy the data. At the end of the 
  application, the same subroutine is called to free the allocated memory.
+ All of that is taken care of by the \pkg{ccSolve} functions.
 
-\proglang{F95} works with vectors, so this gives the most simple codes:
+\proglang{F95} codes can work with number, vectors or matrices similar to R itself, so this gives the most simple codes:
 <<>>=
 fm.f95 = "f = density - 1.d0/(1.d0 + dexp((xmid - dlog(conc))/scal))"
 
 cfm.f95 <- compile.nls(func = fm.f95, par = c(xmid = 0, scal = 1), 
   data = DNase1[,-1])  
+@
+The single string has been expanded to produce a rather complicated program by the \code{compile.nls} function:
+<<>>=
 code(cfm.f95)
 @
-For \proglang{C} the residuals need to be calculated using a loop:
+For \proglang{C} the residuals should be calculated using a loop:
 <<>>=
 cfm.C <- compile.nls(func = '
  int i; 
@@ -511,6 +515,7 @@ cfm.C <- compile.nls(func = '
  parms = c(xmid = 0, scal = 1), 
  data = DNase1[,-1], language = "C")  
 @
+The compiled code problem is faster:
 <<>>=
 print(system.time(
 for (i in 1:100)
@@ -522,7 +527,7 @@ summary(fm2)
 
 \section{optimization problems}
 In optimization problems, one tries to find values of $x$ for which 
-$f(x)$ reaches either a minimum or a maximum; in contrast to the root solving
+$f(x)$ reaches either a minimum or a maximum. In contrast to the root solving
 methods, here the lengths of $x$ and $f(x)$ need not be the same.
 
 The \code{optim} and \code{optimize} functions from the R-base \pkg{stats} package \citep{R2014}
@@ -534,8 +539,8 @@ and \code{compile.optimize}.
 \subsection{Data fitting problem}
 The optimization functions are often used for fitting a model to data. 
 To implement the previous example for use with \code{optim},
-the sum of squared residuals is minimised; the function to minimise, in \proglang{R} and 
-\proglang{F95}:
+the sum of squared residuals is minimised. The functions to minimize, in \proglang{R} and
+\proglang{F95} are:
 <<>>=
 Opt.R <- function(p) {
   with (DNase1[,-1],
@@ -1123,14 +1128,14 @@ plot(sol1, sol2)
 
 \section{Benchmarking}
 This is a quick test of where the time gain using compiled code is achieved.
-It appears that there is lots to be gained by having everything in compiled code;
-compared to pure R this can be 20 to even 100 times faster - however, it is also 
+It appears that there is lots to be gained by having everything in compiled code.
+Compared to pure R compiled codes can be 20 to even 100 times faster - however, it is also
 possible that the gain is only a few percent. This a.o. depends on how many times
-a function is entered and how efficient the R-code is written.
+a function is entered and how efficiently the R-code is written.
 Using compiled code from a call within R may be tens of \% to twice faster than in pure R; 
 compared to all-compiled this is still 10 to 20 times slower.
 
-Here is how I tested several options, using the chaos model:
+Here is how I tested several options, using the chaos differential equation model:
 <<>>=
 require(deSolve)
 
@@ -1208,6 +1213,35 @@ The length is not necessarily known at compile time, so memory is allocated and
 their values are set at the start of the simulation.
 Data are not meant to be changed in the compiled code.
 \end{itemize}
+
+
+\section{Finally}
+To save time it can be a good idea to save the compiled object and load it for later use.
+To allow that, the package \pkg{inline} has been extended with two functions:
+\code{writeDynLib} and \code{readDynLib} to save and load the objects.
+
+Note that it is more robust to put the compiled code in a package instead.
+To obtain the complete compiled code, there are several options:
+\begin{itemize}
+\item \pkg{inline}-function \code{code} will print the code to the screen;
+  when setting the argument \code{linenumbers = FALSE}, this can be copy-pasted.
+\item  The code of a compiled object x can be extracted (rather than printed), using:
+\code{x@code}.  For the above example, the compiled code was called \code{cChaos}.
+The code can be extracted and written to object \code{x} as:
+\code{x <- cChaos[[1]]@code}
+
+To get rid of the new-line character and write to a file:
+\begin{verbatim}
+write (strsplit(x, "\n")[[1]], file = "fn")}
+\end{verbatim}
+\end{itemize}
+
+
+One final warning: it is very easy to produce codes that make R crash!
+I did my best to update the package \pkg{inline} to make it more robust for
+Fortran programmers. Nevertheless, it is not difficult to write corrupt codes,
+even in Fortran. It is the responsibility of the package users to write code
+that is safe to use.
 
 \clearpage
 %\section{subroutine overview}
